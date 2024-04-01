@@ -49,6 +49,7 @@ def plot_images(
         if titles:
             ax.set_title(titles[i])
     fig.tight_layout(pad=pad)
+    pass
 
 
 def plot_keypoints(kpts, colors="lime", ps=4):
