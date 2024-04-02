@@ -21,7 +21,7 @@ from hloc.visualization import plot_images, read_image
 from hloc.utils import viz_3d
 
 from hloc.pipelines.Aachen_v1_1.pipeline_loftr import logger, match_dense, pairs_from_covisibility, triangulation, \
-    pairs_from_retrieval, localize_sfm
+    pairs_from_retrieval, localize_sfm, pformat
 
 
 import shutil
@@ -105,32 +105,41 @@ def rgb_reconstruction_colmap_dense():
 
     pass
 
-def rgb_reconstruction_pipeline_loftr():
+def rgb_reconstruction_semi_dense_pipeline_loftr():
 
-    images = Path("/Users/shilem2/OneDrive - Medtronic PLC/projects/rgbd_reconstruction/data/work_volume_data/20240327_091906_sample/")
+    # images = Path("/Users/shilem2/OneDrive - Medtronic PLC/projects/rgbd_reconstruction/data/work_volume_data/20240327_091906_sample/")
 
-    outputs = Path("../outputs/work_volume/based_on_loftr/")
-    sfm_pairs = outputs / "pairs-sfm.txt"
-    sfm_dir = outputs / "sfm_superpoint+superglue"
-    features = outputs / "features.h5"
-    matches = outputs / "matches.h5"
+    # outputs = Path("../outputs/work_volume/based_on_loftr/")
+    # shutil.rmtree(outputs.as_posix(), ignore_errors=True)
+    # sfm_pairs = outputs / "pairs-sfm.txt"
+    # sfm_dir = outputs / "sfm_superpoint+superglue"
+    # features = outputs / "features.h5"
+    # matches = outputs / "matches.h5"
 
 
     # Setup the paths
-    dataset = args.dataset
-    images = dataset / "images_upright/"
-    sift_sfm = dataset / "3D-models/aachen_v_1_1"
+    # dataset = args.dataset
+    # images = dataset / "images_upright/"
+    images = Path("/Users/shilem2/OneDrive - Medtronic PLC/projects/rgbd_reconstruction/data/work_volume_data/20240327_091906_sample/")
 
-    outputs = args.outputs  # where everything will be saved
-    outputs.mkdir()
+    #
+    sift_sfm = Path('/Users/shilem2/OneDrive - Medtronic PLC/projects/rgbd_reconstruction/Hierarchical-Localization/outputs/work_volume/based_on_demo/sfm_superpoint+superglue/')
+
+    # outputs = args.outputs  # where everything will be saved
+    outputs = Path("../outputs/work_volume/based_on_loftr/")
+    shutil.rmtree(outputs.as_posix(), ignore_errors=True)
+    outputs.mkdir(parents=True)
+
+    # parameters
+    num_covis = 20
+    num_loc = 50
+
     reference_sfm = outputs / "sfm_loftr"  # the SfM model we will build
-    sfm_pairs = (
-        outputs / f"pairs-db-covis{args.num_covis}.txt"
-    )  # top-k most covisible in SIFT model
-    loc_pairs = (
-        outputs / f"pairs-query-netvlad{args.num_loc}.txt"
-    )  # top-k retrieved by NetVLAD
-    results = outputs / f"Aachen-v1.1_hloc_loftr_netvlad{args.num_loc}.txt"
+    sfm_pairs = (outputs / f"pairs-db-covis{num_covis}.txt")  # top-k most covisible in SIFT model
+    loc_pairs = (outputs / f"pairs-query-netvlad{num_loc}.txt")  # top-k retrieved by NetVLAD
+    results = outputs / f"Aachen-v1.1_hloc_loftr_netvlad{num_loc}.txt"
+    features = outputs / "features.h5"
+    matches = outputs / "matches.h5"
 
     # list the standard configurations available
     logger.info("Configs for dense feature matchers:\n%s", pformat(match_dense.confs))
@@ -139,20 +148,16 @@ def rgb_reconstruction_pipeline_loftr():
     retrieval_conf = extract_features.confs["netvlad"]
     matcher_conf = match_dense.confs["loftr_aachen"]
 
-    pairs_from_covisibility.main(sift_sfm, sfm_pairs, num_matched=args.num_covis)
-    features, sfm_matches = match_dense.main(
-        matcher_conf, sfm_pairs, images, outputs, max_kps=8192, overwrite=False
-    )
+    pairs_from_covisibility.main(sift_sfm, sfm_pairs, num_matched=num_covis)
+    features, sfm_matches = match_dense.main(matcher_conf, sfm_pairs, images, outputs, max_kps=8192, overwrite=False)
 
-    triangulation.main(
-        reference_sfm, sift_sfm, images, sfm_pairs, features, sfm_matches
-    )
+    triangulation.main(reference_sfm, sift_sfm, images, sfm_pairs, features, sfm_matches)
 
     global_descriptors = extract_features.main(retrieval_conf, images, outputs)
     pairs_from_retrieval.main(
         global_descriptors,
         loc_pairs,
-        args.num_loc,
+        num_loc,
         query_prefix="query",
         db_model=reference_sfm,
     )
@@ -166,15 +171,28 @@ def rgb_reconstruction_pipeline_loftr():
         matches=sfm_matches,
     )
 
-    localize_sfm.main(
-        reference_sfm,
-        dataset / "queries/*_time_queries_with_intrinsics.txt",
-        loc_pairs,
-        features,
-        loc_matches,
-        results,
-        covisibility_clustering=False,
-    )  # not required with loftr
+
+    # run incremental Structure-From-Motion
+    sfm_dir = outputs / "sfm_superpoint+superglue"
+    model = reconstruction.main(sfm_dir, images, sfm_pairs, features, matches, image_list=references)
+    fig = viz_3d.init_figure()
+    viz_3d.plot_reconstruction(fig, model, color="rgba(255,0,0,0.5)", name="mapping", points_rgb=True)
+    fig.show()
+
+    visualization.visualize_sfm_2d(model, images, color_by="visibility", n=2)
+
+
+
+
+    # localize_sfm.main(
+    #     reference_sfm,
+    #     dataset / "queries/*_time_queries_with_intrinsics.txt",
+    #     loc_pairs,
+    #     features,
+    #     loc_matches,
+    #     results,
+    #     covisibility_clustering=False,
+    # )  # not required with loftr
 
 
 
@@ -185,6 +203,7 @@ def rgb_reconstruction_pipeline_loftr():
 if __name__ == '__main__':
 
     # rgb_reconstruction_based_on_demo()
-    rgb_reconstruction_colmap_dense()
+    # rgb_reconstruction_colmap_dense()
+    rgb_reconstruction_semi_dense_pipeline_loftr()
 
     pass
